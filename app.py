@@ -14,6 +14,7 @@ import datetime
 import openai
 import time
 import traceback
+import mysql.connector
 #======python的函數庫==========
 
 app = Flask(__name__)
@@ -33,6 +34,15 @@ def GPT_response(text):
     # 重組回應
     answer = response['choices'][0]['text'].replace('。','')
     return answer
+
+# 設定 MySQL 連接資訊
+db_config = {
+    'host': 'localhost',
+    'user': 'admin',
+    'password': 'wei920116',
+    'database': 'newschema',
+    'charset': 'utf8'
+}
 
 #test
 # 監聽所有來自 /callback 的 Post Request
@@ -65,6 +75,47 @@ def handle_message(event):
         print(traceback.format_exc())  # 打印錯誤堆疊追踪
         # 向用戶發送錯誤信息
         line_bot_api.reply_message(event.reply_token, TextSendMessage('發生錯誤: ' + error_message))
+
+    # 獲取使用者傳來的文字訊息
+    user_input = event.message.text
+
+    # 檢查是否輸入了有效的使用者名稱
+    if user_input.lower() == "使用者名稱":
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="請輸入您要查詢的使用者名稱，例如：JohnDoe")
+        )
+        return
+
+    # 連接 MySQL 資料庫
+    connection = mysql.connector.connect(**db_config)
+    cursor = connection.cursor()
+
+    try:
+        # 使用參數化查詢
+        query = "SELECT * FROM user WHERE user_name = %s"
+        cursor.execute(query, (user_input,))
+        result = cursor.fetchone()
+
+        # 回覆使用者
+        if result:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=f"使用者名稱: {result[0]}, 其他資訊: {result[1]}")
+            )
+        else:
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text="找不到該使用者名稱的資料。")
+            )
+    except Exception as e:
+        print(f"Error: {e}")
+    finally:
+        # 關閉 MySQL 連接
+        cursor.close()
+        connection.close()
+
+        
 
 
 @handler.add(PostbackEvent)
