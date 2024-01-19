@@ -79,7 +79,7 @@ def handle_message(event):
     msg = event.message.text
     try:
         # 檢查資料庫連線是否成功
-        db_connection = test_database_connection()
+        db_connection, error = test_database_connection()
         if db_connection is not None:
             print("資料庫連接成功！")
             # 如果資料庫連線成功，則執行 GPT 回應
@@ -89,7 +89,7 @@ def handle_message(event):
         else:
             print("資料庫連接失敗。")
             # 如果資料庫連線失敗，向用戶發送錯誤信息
-            line_bot_api.reply_message(event.reply_token, TextSendMessage('資料庫連接失敗'))
+            line_bot_api.reply_message(event.reply_token, TextSendMessage(f'資料庫連接失敗: {error}'))
     except Exception as e:
         # 捕捉具體的異常
         error_message = str(e)  # 將異常轉換為字符串
