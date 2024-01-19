@@ -43,6 +43,17 @@ db_config = {
     'database': 'newschema',
     'charset': 'utf8'
 }
+# 初始設定資料庫連接狀態
+db_connected = False
+
+def connect_to_database():
+    try:
+        # 連接 MySQL 資料庫
+        connection = mysql.connector.connect(**db_config)
+        return connection
+    except Exception as e:
+        print(f"Error connecting to database: {e}")
+        return None
 
 #test
 # 監聽所有來自 /callback 的 Post Request
@@ -64,59 +75,49 @@ def callback():
 # 處理訊息
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
+    global db_connected
     msg = event.message.text
-    try:
-        GPT_answer = GPT_response(msg)
-        print(GPT_answer)
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
-    except Exception as e:  # 捕捉具體的異常
-        error_message = str(e)  # 將異常轉換為字符串
-        print('發生錯誤:', error_message)  # 在後台日誌中打印錯誤
-        print(traceback.format_exc())  # 打印錯誤堆疊追踪
-        # 向用戶發送錯誤信息
-        line_bot_api.reply_message(event.reply_token, TextSendMessage('發生錯誤: ' + error_message))
 
-    # 獲取使用者傳來的文字訊息
-    user_input = event.message.text
-
-    # 檢查是否輸入了有效的使用者名稱
-    if user_input.lower() == "使用者名稱":
-        line_bot_api.reply_message(
-            event.reply_token,
-            TextSendMessage(text="請輸入您要查詢的使用者名稱，例如：JohnDoe")
-        )
-        return
-
-    # 連接 MySQL 資料庫
-    connection = mysql.connector.connect(**db_config)
-    cursor = connection.cursor()
-
-    try:
-        # 使用參數化查詢
-        query = "SELECT * FROM user WHERE user_name = %s"
-        cursor.execute(query, (user_input,))
-        result = cursor.fetchone()
-
-        # 回覆使用者
-        if result:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text=f"使用者名稱: {result[0]}, 其他資訊: {result[1]}")
-            )
+    if msg == "你好":
+        # 檢查資料庫連接狀態
+        if db_connected:
+            line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫已連接"))
         else:
-            line_bot_api.reply_message(
-                event.reply_token,
-                TextSendMessage(text="找不到該使用者名稱的資料。")
-            )
-    except Exception as e:
-        print(f"Error: {e}")
-    finally:
-        # 關閉 MySQL 連接
-        cursor.close()
-        connection.close()
+            # 嘗試連接資料庫
+            connection = connect_to_database()
+            if connection:
+                db_connected = True
+                line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫已連接"))
+                connection.close()
+            else:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫連接失敗"))
+    else:
+        try:
+            # 連接 MySQL 資料庫
+            connection = mysql.connector.connect(**db_config)
+            cursor = connection.cursor()
 
-        
+            # 使用參數化查詢
+            query = "SELECT response FROM responses WHERE user_name = %s"
+            cursor.execute(query, (msg,))
+            result = cursor.fetchone()
 
+            # 回覆使用者
+            if result:
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(result[0]))
+            else:
+                # 如果找不到相應的資料，使用 GPT 模型回覆
+                GPT_answer = GPT_response(msg)
+                print(GPT_answer)
+                line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
+        except Exception as e:
+            print(f"Error: {e}")
+            error_message = str(e)
+            line_bot_api.reply_message(event.reply_token, TextSendMessage('發生錯誤: ' + error_message))
+        finally:
+            # 關閉 MySQL 連接
+            cursor.close()
+            connection.close()
 
 @handler.add(PostbackEvent)
 def handle_message(event):
