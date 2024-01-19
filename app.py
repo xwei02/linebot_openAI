@@ -35,6 +35,8 @@ def GPT_response(text):
     answer = response['choices'][0]['text'].replace('。','')
     return answer
 
+import mysql.connector
+
 # 設定 MySQL 連接資訊
 db_config = {
     'host': 'localhost',
@@ -43,10 +45,9 @@ db_config = {
     'database': 'newschema',
     'charset': 'utf8'
 }
-# 初始設定資料庫連接狀態
-db_connected = False
 
-def connect_to_database():
+# 測試資料庫連接函數
+def test_database_connection():
     try:
         # 連接 MySQL 資料庫
         connection = mysql.connector.connect(**db_config)
@@ -54,6 +55,13 @@ def connect_to_database():
     except Exception as e:
         print(f"Error connecting to database: {e}")
         return None
+
+# 在應用程序啟動時測試資料庫連接
+db_connection = test_database_connection()
+if db_connection is not None:
+    print("資料庫連接成功！")
+else:
+    print("資料庫連接失敗。")
 
 #test
 # 監聽所有來自 /callback 的 Post Request
@@ -75,49 +83,17 @@ def callback():
 # 處理訊息
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    global db_connected
-    msg = event.message.text
-
-    if msg == "你好":
-        # 檢查資料庫連接狀態
-        if db_connected:
-            line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫已連接"))
-        else:
-            # 嘗試連接資料庫
-            connection = connect_to_database()
-            if connection:
-                db_connected = True
-                line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫已連接"))
-                connection.close()
-            else:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage("資料庫連接失敗"))
-    else:
-        try:
-            # 連接 MySQL 資料庫
-            connection = mysql.connector.connect(**db_config)
-            cursor = connection.cursor()
-
-            # 使用參數化查詢
-            query = "SELECT response FROM responses WHERE user_name = %s"
-            cursor.execute(query, (msg,))
-            result = cursor.fetchone()
-
-            # 回覆使用者
-            if result:
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(result[0]))
-            else:
-                # 如果找不到相應的資料，使用 GPT 模型回覆
-                GPT_answer = GPT_response(msg)
-                print(GPT_answer)
-                line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
-        except Exception as e:
-            print(f"Error: {e}")
-            error_message = str(e)
-            line_bot_api.reply_message(event.reply_token, TextSendMessage('發生錯誤: ' + error_message))
-        finally:
-            # 關閉 MySQL 連接
-            cursor.close()
-            connection.close()
+   msg = event.message.text
+   try:
+        GPT_answer = GPT_response(msg)
+        print(GPT_answer)
+        line_bot_api.reply_message(event.reply_token, TextSendMessage(GPT_answer))
+   except Exception as e:  # 捕捉具體的異常
+        error_message = str(e)  # 將異常轉換為字符串
+        print('發生錯誤:', error_message)  # 在後台日誌中打印錯誤
+        print(traceback.format_exc())  # 打印錯誤堆疊追踪
+        # 向用戶發送錯誤信息
+        line_bot_api.reply_message(event.reply_token, TextSendMessage('發生錯誤: ' + error_message))
 
 @handler.add(PostbackEvent)
 def handle_message(event):
