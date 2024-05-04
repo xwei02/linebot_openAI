@@ -1,12 +1,15 @@
 from flask import Flask, request, abort
 
-from linebot import (
-    LineBotApi, WebhookHandler
-)
+from linebot import LineBotApi, WebhookHandler
+
+
 from linebot.exceptions import (
     InvalidSignatureError
 )
 from linebot.models import *
+from linebot.exceptions import InvalidSignatureError, LineBotApiError
+from linebot.models import TextMessage, MessageEvent, TextSendMessage
+
 
 #======python的函數庫==========
 import tempfile, os
@@ -15,6 +18,7 @@ import openai
 import time
 import traceback
 import mysql.connector
+import json
 #======python的函數庫==========
 from dotenv import load_dotenv
 load_dotenv()
@@ -28,15 +32,18 @@ handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 # OPENAI API Key初始化設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
 
-
-
-# def GPT_response(text):
-#     # 接收回應
-#     response = openai.Completion.create(model="gpt-3.5-turbo", prompt=text, temperature=0.5, max_tokens=500)
-#     print(response)
-#     # 重組回應
-#     answer = response['choices'][0]['text'].replace('。','')
-#     return answer
+def GPT_response(text):
+    response = openai.ChatCompletion.create(
+        model="gpt-4",  # 确保使用正确的模型名称
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": text}
+        ],
+        temperature=0.5,
+        max_tokens=500
+    )
+    answer = response['choices'][0]['message']['content'].strip()
+    return answer
 
 
 # 設定 MySQL 連接資訊
@@ -62,6 +69,7 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        app.logger.error("Invalid signature. Please check your channel access token/channel secret.")
         abort(400)
     return 'OK'
 
@@ -75,30 +83,69 @@ def test_database_connection():
         print(f"Error connecting to database: {e}")
         return None
 
+def test_openai_connection():
+    try:
+        openai.api_key = os.getenv('OPENAI_API_KEY')
+        
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": "Hello, world!"}]
+        )
+        
+        print("OpenAI API test response:", response['choices'][0]['message']['content'].strip())
+        return True
+    except Exception as e:
+        print("Failed to connect to OpenAI API:", str(e))
+        return False
+
+if test_openai_connection():
+    print("Connection to OpenAI API is successful.")
+else:
+    print("Failed to connect to OpenAI API.")
+
+
+# 调用测试函数
+if test_openai_connection():
+    print("Connection to OpenAI API is successful.")
+else:
+    print("Failed to connect to OpenAI API.")
+
 
 
 @handler.add(MessageEvent, message=TextMessage)
 def handle_message(event):
-    msg = event.message.text
-    try:
-        # 檢查資料庫連線是否成功
-        db_connection = test_database_connection()
-        if db_connection is not None:
-            db_connection.close()
-            print("資料庫連接成功！")
-            # 回復用戶訊息
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text='收到您的訊息'))
-        else:
-            print("資料庫連接失敗。")
-            # 如果資料庫連線失敗，向用戶發送錯誤信息
-            line_bot_api.reply_message(event.reply_token, TextSendMessage(text='資料庫連接失敗'))
-    except Exception as e:
-        # 捕捉具體的異常
-        error_message = str(e)
-        print('發生錯誤:', error_message)
-        print(traceback.format_exc())
-        # 向用戶發送錯誤信息
-        line_bot_api.reply_message(event.reply_token, TextSendMessage(text='發生錯誤: ' + error_message))
+    user_message = event.message.text
+    app.logger.info(f"Received message: {user_message}")
+
+    # Check if the message starts with "Hi AI:"
+    if user_message.lower().startswith('hi ai:'):
+        query_text = user_message[6:].strip()  # 从 'Hi AI:' 后获取文本
+        # 添加繁体中文请求
+        prompt_text = f"請用繁體中文回答以下問題：{query_text}"
+
+        try:
+            # Extract the text after "Hi AI:"
+            query_text = user_message[6:].strip()
+            response = openai.ChatCompletion.create(
+                model="gpt-4",
+                messages=[{"role": "user", "content": prompt_text}]
+            )
+            answer = response['choices'][0]['message']['content'].strip()
+            line_bot_api.reply_message(
+                event.reply_token,
+                TextSendMessage(text=answer)
+            )
+            app.logger.info(f"Sent reply: {answer}")
+        except LineBotApiError as e:
+            app.logger.error(f"Failed to reply message: {str(e)}")
+        except Exception as e:
+            app.logger.error(f"OpenAI error: {str(e)}")
+    else:
+        # Optionally, reply with a generic message or do not reply at all
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="Hello! Please start your message with 'Hi AI:' to get a response.")
+        )
 
 @handler.add(PostbackEvent)
 def handle_message(event):
