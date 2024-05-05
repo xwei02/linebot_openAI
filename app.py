@@ -118,7 +118,7 @@ def handle_message(event):
     app.logger.info(f"Received message: {user_message}")
 
     # 检测是否为手术相关的问题
-    if '手術' in user_message or '治療方法' in user_message:
+    if '手術' in user_message or '治療方法' in user_message or '注意事項' in user_message:
         prompt_text = f"身為醫生，請用繁體中文回答以下手術相關的問題：\n{user_message}"
         try:
             response = openai.ChatCompletion.create(
