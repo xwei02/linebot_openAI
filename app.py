@@ -117,15 +117,10 @@ def handle_message(event):
     user_message = event.message.text
     app.logger.info(f"Received message: {user_message}")
 
-    # Check if the message starts with "Hi AI:"
-    if user_message.lower().startswith('hi ai:'):
-        query_text = user_message[6:].strip()  # 从 'Hi AI:' 后获取文本
-        # 添加繁体中文请求
-        prompt_text = f"請用繁體中文回答以下問題：{query_text}"
-
+    # 检测是否为手术相关的问题
+    if '手術' in user_message or '治療方法' in user_message:
+        prompt_text = f"身為醫生，請用繁體中文回答以下手術相關的問題：\n{user_message}"
         try:
-            # Extract the text after "Hi AI:"
-            query_text = user_message[6:].strip()
             response = openai.ChatCompletion.create(
                 model="gpt-4",
                 messages=[{"role": "user", "content": prompt_text}]
@@ -141,10 +136,10 @@ def handle_message(event):
         except Exception as e:
             app.logger.error(f"OpenAI error: {str(e)}")
     else:
-        # Optionally, reply with a generic message or do not reply at all
+        # 如果不是手术相关的问题，可以选择不回答或给予通用回答
         line_bot_api.reply_message(
             event.reply_token,
-            TextSendMessage(text="Hello! Please start your message with 'Hi AI:' to get a response.")
+            TextSendMessage(text="您好！請問您有什麼手術相關的問題嗎？")
         )
 
 @handler.add(PostbackEvent)
