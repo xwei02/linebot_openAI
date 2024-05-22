@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>綁定帳號</title>
+</head>
+<body>
+    <h1>绑定账号</h1>
+    <form action="/bind_account" method="post">
+        <label for="line_id">Line ID：</label>
+        <input type="text" id="line_id" name="line_id" required>
+        <br><br>
+        <label for="user_idNumber">身份证号码：</label>
+        <input type="text" id="user_idNumber" name="user_idNumber" required>
+        <br><br>
+        <label for="birthdate">出生日期：</label>
+        <input type="date" id="birthdate" name="birthdate" required>
+        <br><br>
+        <input type="submit" value="绑定">
+    </form>
+</body>
+</html>
+

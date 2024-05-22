@@ -9,6 +9,10 @@ from linebot.exceptions import (
 from linebot.models import *
 from linebot.exceptions import InvalidSignatureError, LineBotApiError
 from linebot.models import TextMessage, MessageEvent, TextSendMessage
+from flask import Flask, request, render_template, redirect, url_for
+import mysql.connector
+from mysql.connector import Error
+from linebot.models import RichMenu, RichMenuSize, RichMenuArea, RichMenuBounds, URIAction
 
 
 #======python的函數庫==========
@@ -72,6 +76,22 @@ def callback():
         app.logger.error("Invalid signature. Please check your channel access token/channel secret.")
         abort(400)
     return 'OK'
+
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    user_id = event.source.user_id
+    user_message = event.message.text
+    app.logger.info(f"Received message: {user_message} from user: {user_id}")
+
+    # 生成绑定账户的URL
+    bind_url = f"{request.url_root}bind_account?line_id={user_id}"
+
+    # 构建回复消息
+    reply_text = f"请点击以下链接绑定您的账号：\n{bind_url}"
+    line_bot_api.reply_message(
+        event.reply_token,
+        TextSendMessage(text=reply_text)
+    )
 
 # 測試資料庫連接函數
 def test_database_connection():
@@ -155,6 +175,47 @@ def welcome(event):
     name = profile.display_name
     message = TextSendMessage(text=f'{name}歡迎加入')
     line_bot_api.reply_message(event.reply_token, message)
+
+@app.route('/bind_account', methods=['GET', 'POST'])
+def bind_account():
+       line_id = request.args.get('line_id')  # 獲取LINE ID
+       if not line_id:
+           app.logger.error("Line ID is missing from the URL.")
+           return "Line ID is missing. Please make sure the URL includes the line_id parameter."
+       
+       app.logger.info(f"Line ID: {line_id}")
+       if request.method == 'POST':
+           user_idNumber = request.form['user_idNumber']
+           birthdate = request.form['birthdate']
+           app.logger.info(f"user_idNumber: {user_idNumber}, birthdate: {birthdate}")
+
+           try:
+               connection = mysql.connector.connect(**db_config)
+               cursor = connection.cursor()
+               cursor.execute("SELECT * FROM user WHERE user_idNumber = %s AND birthdate = %s", (user_idNumber, birthdate))
+               user = cursor.fetchone()
+               if user:
+                   cursor.execute("UPDATE user SET line_id = %s WHERE user_idNumber = %s", (line_id, user_idNumber))
+                   connection.commit()
+                   cursor.close()
+                   connection.close()
+                   return redirect(url_for('bind_success'))
+               else:
+                   app.logger.info("用戶資訊不匹配")
+                   return "用戶資訊不匹配，請檢查您的身份證號碼和生日。"
+           except mysql.connector.Error as e:
+               app.logger.error(f"Database error: {e}")
+               return f"An error occurred: {e}"
+           except Exception as e:
+               app.logger.error(f"An error occurred: {e}")
+               return f"An error occurred: {e}"
+
+       return render_template('bind_account.html', line_id=line_id)
+
+@app.route('/bind_success')
+def bind_success():
+       return "綁定成功！"
+
         
 @app.route('/')
 def index():
