@@ -176,6 +176,102 @@ def welcome(event):
     message = TextSendMessage(text=f'{name}歡迎加入')
     line_bot_api.reply_message(event.reply_token, message)
 
+@handler.add(MessageEvent, message=TextMessage)
+def handle_message(event):
+    line_id = event.source.user_id  # 獲取用戶的line_id
+    user_message = event.message.text
+    app.logger.info(f"Received message: {user_message} from user: {line_id}")
+
+    if user_message == "約診/檢查事項":
+        # 獲取預約信息並回覆
+        reminder_response = get_appointment_reminders(line_id)
+        line_bot_api.reply_message(
+            event.reply_token,
+            reminder_response
+        )
+    else:
+        # 其他消息的處理邏輯
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="您好！請問您有什麼手術相關的問題嗎？")
+        )
+
+def get_appointment_reminders(line_id):
+    try:
+        connection = mysql.connector.connect(**db_config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT user_id FROM user WHERE line_id = %s", (line_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            app.logger.info("沒有找到line_id為 %s 的用戶", line_id)
+            return [TextSendMessage(text="沒有找到您的信息，請先綁定賬戶。")]
+
+        user_id = user[0]
+        app.logger.info("找到line_id為 %s 的用戶，user_id為 %s", line_id, user_id)
+
+        # 獲取醫療預約信息
+        cursor.execute("""
+            SELECT appointment_division, appointment_date, appointment_timeperiod, doctor_name
+            FROM medical_appointment
+            WHERE user_id = %s
+        """, (user_id,))
+        medical_appointments = cursor.fetchall()
+        app.logger.info("醫療預約信息: %s", medical_appointments)
+
+        # 獲取檢查預約信息
+        cursor.execute("""
+            SELECT inspection_item, appointment_date, chicking_location, test_preparation, inspection_precautions, inspection_availableTime
+            FROM inspection_appointment
+            WHERE user_id = %s
+        """, (user_id,))
+        inspection_appointments = cursor.fetchall()
+        app.logger.info("檢查預約信息: %s", inspection_appointments)
+
+        cursor.close()
+        connection.close()
+
+        messages = []
+
+        # 構建醫療預約信息消息
+        if medical_appointments:
+            for appt in medical_appointments:
+                message = (
+                    f"醫療預約信息\n"
+                    f"預約科別: {appt[0]}\n"
+                    f"預約日期: {appt[1]}\n"
+                    f"預約時段: {appt[2]}\n"
+                    f"醫生姓名: {appt[3]}"
+                )
+                messages.append(TextSendMessage(text=message))
+        else:
+            messages.append(TextSendMessage(text="沒有找到任何醫療預約信息。"))
+
+        # 構建檢查預約信息消息
+        if inspection_appointments:
+            for insp in inspection_appointments:
+                message = (
+                    f"檢查預約信息\n"
+                    f"檢查項目: {insp[0]}\n"
+                    f"預約日期: {insp[1]}\n"
+                    f"檢查地點: {insp[2]}\n"
+                    f"檢查準備: {insp[3]}\n"
+                    f"檢查注意事項- {insp[4]}\n"
+                    f"可用檢查時間: {insp[5]}"
+                )
+                messages.append(TextSendMessage(text=message))
+        else:
+            messages.append(TextSendMessage(text="沒有找到任何檢查預約信息。"))
+
+        return messages
+    except mysql.connector.Error as e:
+        app.logger.error("數據庫錯誤: %s", e)
+        return [TextSendMessage(text=f"數據庫錯誤，請稍後再試。錯誤詳情：{e}")]
+    except Exception as e:
+        app.logger.error("發生錯誤: %s", e)
+        return [TextSendMessage(text=f"發生錯誤，請稍後再試。錯誤詳情：{e}")]
+    
+
 @app.route('/bind_account', methods=['GET', 'POST'])
 def bind_account():
     if request.method == 'POST':
@@ -198,7 +294,7 @@ def bind_account():
                 # 返回成功页面
                 return redirect(url_for('bind_success'))
             else:
-                app.logger.info("用户信息不匹配")
+                app.logger.info("用戶信息不匹配")
                 return "用戶資訊不匹配，請檢查您的身分證號碼和生日。"
         except mysql.connector.Error as e:
             app.logger.error(f"Database error: {e}")
@@ -208,70 +304,14 @@ def bind_account():
             return f"An error occurred: {e}"
 
     return render_template('bind_account.html')
-
-@app.route('/bind_success')
-def bind_success():
-       return "綁定成功！"
-
         
 @app.route('/')
 def index():
     return 'Hello, World!'
 
-@app.route('/send_reminder', methods=['GET'])
-def send_reminder():
-    line_id = request.args.get('line_id')
-    if not line_id:
-        return jsonify({"error": "Missing line_id"}), 400
-
-    try:
-        connection = mysql.connector.connect(**db_config)
-        cursor = connection.cursor()
-        cursor.execute("SELECT user_id FROM user WHERE line_id = %s", (line_id,))
-        user = cursor.fetchone()
-
-        if not user:
-            return jsonify({"error": "User not found"}), 404
-
-        user_id = user[0]
-        cursor.execute("""
-            SELECT appointment_division, appointment_date, appointment_timeperiod, doctor_name
-            FROM medical_appointment
-            WHERE user_id = %s
-        """, (user_id,))
-        appointments = cursor.fetchall()
-        cursor.close()
-        connection.close()
-
-        if not appointments:
-            line_bot_api.push_message(line_id, TextSendMessage(text="没有找到任何预约信息。"))
-        else:
-            messages = []
-            for appt in appointments:
-                message = (
-                    f"预约科别: {appt[0]}\n"
-                    f"预约日期: {appt[1]}\n"
-                    f"预约时段: {appt[2]}\n"
-                    f"医生姓名: {appt[3]}"
-                )
-                messages.append(TextSendMessage(text=message))
-
-            # 发送所有消息
-            line_bot_api.push_message(line_id, messages)
-
-        return jsonify({"status": "success"}), 200
-    except mysql.connector.Error as e:
-        app.logger.error(f"Database error: {e}")
-        return jsonify({"error": str(e)}), 500
-    except Exception as e:
-        app.logger.error(f"An error occurred: {e}")
-        return jsonify({"error": str(e)}), 500
-
-@handler.add(PostbackEvent)
-def handle_postback(event):
-    data = event.postback.data
-    if data == 'send_reminder':
-        send_reminder({'line_id': event.source.user_id})
+@app.route('/bind_success')
+def bind_success():
+    return "綁定成功！"
 
     
 import os
