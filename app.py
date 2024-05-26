@@ -1,4 +1,4 @@
-from flask import Flask, request, abort
+from flask import Flask, request, abort, jsonify
 
 from linebot import LineBotApi, WebhookHandler
 
@@ -178,39 +178,36 @@ def welcome(event):
 
 @app.route('/bind_account', methods=['GET', 'POST'])
 def bind_account():
-       line_id = request.args.get('line_id')  # 獲取LINE ID
-       if not line_id:
-           app.logger.error("Line ID is missing from the URL.")
-           return "Line ID is missing. Please make sure the URL includes the line_id parameter."
-       
-       app.logger.info(f"Line ID: {line_id}")
-       if request.method == 'POST':
-           user_idNumber = request.form['user_idNumber']
-           birthdate = request.form['birthdate']
-           app.logger.info(f"user_idNumber: {user_idNumber}, birthdate: {birthdate}")
+    if request.method == 'POST':
+        line_id = request.form['line_id']
+        user_idNumber = request.form['user_idNumber']
+        birthdate = request.form['birthdate']
+        app.logger.info(f"line_id: {line_id}, user_idNumber: {user_idNumber}, birthdate: {birthdate}")
 
-           try:
-               connection = mysql.connector.connect(**db_config)
-               cursor = connection.cursor()
-               cursor.execute("SELECT * FROM user WHERE user_idNumber = %s AND birthdate = %s", (user_idNumber, birthdate))
-               user = cursor.fetchone()
-               if user:
-                   cursor.execute("UPDATE user SET line_id = %s WHERE user_idNumber = %s", (line_id, user_idNumber))
-                   connection.commit()
-                   cursor.close()
-                   connection.close()
-                   return redirect(url_for('bind_success'))
-               else:
-                   app.logger.info("用戶資訊不匹配")
-                   return "用戶資訊不匹配，請檢查您的身份證號碼和生日。"
-           except mysql.connector.Error as e:
-               app.logger.error(f"Database error: {e}")
-               return f"An error occurred: {e}"
-           except Exception as e:
-               app.logger.error(f"An error occurred: {e}")
-               return f"An error occurred: {e}"
+        try:
+            connection = mysql.connector.connect(**db_config)
+            cursor = connection.cursor()
+            cursor.execute("SELECT * FROM user WHERE user_idNumber = %s AND birthdate = %s", (user_idNumber, birthdate))
+            user = cursor.fetchone()
+            if user:
+                cursor.execute("UPDATE user SET line_id = %s WHERE user_idNumber = %s", (line_id, user_idNumber))
+                connection.commit()
+                cursor.close()
+                connection.close()
 
-       return render_template('bind_account.html', line_id=line_id)
+                # 返回成功页面
+                return redirect(url_for('bind_success'))
+            else:
+                app.logger.info("用户信息不匹配")
+                return "用戶資訊不匹配，請檢查您的身分證號碼和生日。"
+        except mysql.connector.Error as e:
+            app.logger.error(f"Database error: {e}")
+            return f"An error occurred: {e}"
+        except Exception as e:
+            app.logger.error(f"An error occurred: {e}")
+            return f"An error occurred: {e}"
+
+    return render_template('bind_account.html')
 
 @app.route('/bind_success')
 def bind_success():
@@ -220,6 +217,61 @@ def bind_success():
 @app.route('/')
 def index():
     return 'Hello, World!'
+
+@app.route('/send_reminder', methods=['GET'])
+def send_reminder():
+    line_id = request.args.get('line_id')
+    if not line_id:
+        return jsonify({"error": "Missing line_id"}), 400
+
+    try:
+        connection = mysql.connector.connect(**db_config)
+        cursor = connection.cursor()
+        cursor.execute("SELECT user_id FROM user WHERE line_id = %s", (line_id,))
+        user = cursor.fetchone()
+
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+
+        user_id = user[0]
+        cursor.execute("""
+            SELECT appointment_division, appointment_date, appointment_timeperiod, doctor_name
+            FROM medical_appointment
+            WHERE user_id = %s
+        """, (user_id,))
+        appointments = cursor.fetchall()
+        cursor.close()
+        connection.close()
+
+        if not appointments:
+            line_bot_api.push_message(line_id, TextSendMessage(text="没有找到任何预约信息。"))
+        else:
+            messages = []
+            for appt in appointments:
+                message = (
+                    f"预约科别: {appt[0]}\n"
+                    f"预约日期: {appt[1]}\n"
+                    f"预约时段: {appt[2]}\n"
+                    f"医生姓名: {appt[3]}"
+                )
+                messages.append(TextSendMessage(text=message))
+
+            # 发送所有消息
+            line_bot_api.push_message(line_id, messages)
+
+        return jsonify({"status": "success"}), 200
+    except mysql.connector.Error as e:
+        app.logger.error(f"Database error: {e}")
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        app.logger.error(f"An error occurred: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@handler.add(PostbackEvent)
+def handle_postback(event):
+    data = event.postback.data
+    if data == 'send_reminder':
+        send_reminder({'line_id': event.source.user_id})
 
     
 import os
