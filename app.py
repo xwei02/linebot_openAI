@@ -92,7 +92,8 @@ def send_reminders():
 
         # 获取需要提醒的检查预约信息
         cursor.execute("""
-            SELECT user.line_id, inspection_appointment.inspection_item, inspection_appointment.appointment_date, inspection_appointment.chicking_location, inspection_appointment.test_preparation, inspection_appointment.inspection_precautions, inspection_appointment.inspection_availableTime
+            SELECT user.line_id, inspection_appointment.inspection_item, inspection_appointment.appointment_date, inspection_appointment.chicking_location, inspection_appointment.test_preparation, 
+                       inspection_appointment.inspection_precautions, inspection_appointment.inspection_availableTime
             FROM inspection_appointment
             JOIN user ON inspection_appointment.user_id = user.user_id
             WHERE inspection_appointment.appointment_date = %s
@@ -116,13 +117,13 @@ def send_reminders():
         for reminder in inspection_reminders:
             line_id, item, date, location, preparation, precautions, available_time = reminder
             message = (
-                f"提醒您，您在下個禮拜有一個檢查預約：\n"
-                f"檢查項目: {item}\n"
+                f"提醒您，您在下個禮拜有一個檢驗預約：\n"
+                f"檢驗項目: {item}\n"
                 f"預約日期: {date}\n"
-                f"檢查地點: {location}\n"
-                f"檢查準備: {preparation}\n"
-                f"檢查注意事項: {precautions}\n"
-                f"可用檢查時間: {available_time}"
+                f"檢驗地點: {location}\n"
+                f"檢驗準備: {preparation}\n"
+                f"檢驗注意事項: {precautions}\n"
+                f"可用檢驗時間: {available_time}"
             )
             line_bot_api.push_message(line_id, TextSendMessage(text=message))
 
@@ -339,13 +340,13 @@ def get_appointment_reminders(line_id):
         if inspection_appointments:
             for insp in inspection_appointments:
                 message = (
-                    f"檢查預約信息\n"
-                    f"檢查項目: {insp[0]}\n"
+                    f"檢驗預約信息\n"
+                    f"檢驗項目: {insp[0]}\n"
                     f"預約日期: {insp[1]}\n"
-                    f"檢查地點: {insp[2]}\n"
-                    f"檢查準備: {insp[3]}\n"
-                    f"檢查注意事項- {insp[4]}\n"
-                    f"可用檢查時間: {insp[5]}"
+                    f"檢驗地點: {insp[2]}\n"
+                    f"檢驗準備: {insp[3]}\n"
+                    f"檢驗注意事項- {insp[4]}\n"
+                    f"可用檢驗時間: {insp[5]}"
                 )
                 messages.append(TextSendMessage(text=message))
         else:
