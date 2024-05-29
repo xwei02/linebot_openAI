@@ -1,4 +1,5 @@
-from flask import Flask, request, abort, jsonify
+import logging
+from flask import Flask, request, abort, jsonify,send_from_directory
 
 from linebot import LineBotApi, WebhookHandler
 
@@ -13,6 +14,14 @@ from flask import Flask, request, render_template, redirect, url_for
 import mysql.connector
 from mysql.connector import Error
 from linebot.models import RichMenu, RichMenuSize, RichMenuArea, RichMenuBounds, URIAction
+import schedule
+import time
+import threading
+from datetime import datetime, timedelta
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
+
 
 
 #======python的函數庫==========
@@ -35,6 +44,10 @@ line_bot_api = LineBotApi(os.getenv('CHANNEL_ACCESS_TOKEN'))
 handler = WebhookHandler(os.getenv('CHANNEL_SECRET'))
 # OPENAI API Key初始化設定
 openai.api_key = os.getenv('OPENAI_API_KEY')
+
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory('/Users/wuxinwei/linebot_openai3', 'favicon.ico', mimetype='image/vnd.microsoft.icon')
 
 def GPT_response(text):
     response = openai.ChatCompletion.create(
@@ -60,21 +73,96 @@ db_config = {
     'charset': 'utf8'
 }
 
+def send_reminders():
+    try:
+        connection = mysql.connector.connect(**db_config)
+        cursor = connection.cursor()
+        next_week = datetime.datetime.now() + timedelta(days=7)
+        next_week_str = next_week.strftime('%Y-%m-%d')
+
+        # 获取需要提醒的医疗预约信息
+        cursor.execute("""
+            SELECT user.line_id, medical_appointment.appointment_division, medical_appointment.appointment_date, medical_appointment.appointment_timeperiod, medical_appointment.doctor_name
+            FROM medical_appointment
+            JOIN user ON medical_appointment.user_id = user.user_id
+            WHERE medical_appointment.appointment_date = %s
+        """, (next_week_str,))
+        medical_reminders = cursor.fetchall()
+        app.logger.info("獲取到的醫療訊息: %s", medical_reminders)
+
+        # 获取需要提醒的检查预约信息
+        cursor.execute("""
+            SELECT user.line_id, inspection_appointment.inspection_item, inspection_appointment.appointment_date, inspection_appointment.chicking_location, inspection_appointment.test_preparation, inspection_appointment.inspection_precautions, inspection_appointment.inspection_availableTime
+            FROM inspection_appointment
+            JOIN user ON inspection_appointment.user_id = user.user_id
+            WHERE inspection_appointment.appointment_date = %s
+        """, (next_week_str,))
+        inspection_reminders = cursor.fetchall()
+        app.logger.info("獲取到的醫療訊息: %s", inspection_reminders)
+
+        # 发送医疗预约提醒
+        for reminder in medical_reminders:
+            line_id, division, date, timeperiod, doctor = reminder
+            message = (
+                f"提醒您，您在下個禮拜有一個醫療預約：\n"
+                f"預約科別: {division}\n"
+                f"預約日期: {date}\n"
+                f"預約時段: {timeperiod}\n"
+                f"醫生姓名: {doctor}"
+            )
+            line_bot_api.push_message(line_id, TextSendMessage(text=message))
+
+        # 发送检查预约提醒
+        for reminder in inspection_reminders:
+            line_id, item, date, location, preparation, precautions, available_time = reminder
+            message = (
+                f"提醒您，您在下個禮拜有一個檢查預約：\n"
+                f"檢查項目: {item}\n"
+                f"預約日期: {date}\n"
+                f"檢查地點: {location}\n"
+                f"檢查準備: {preparation}\n"
+                f"檢查注意事項: {precautions}\n"
+                f"可用檢查時間: {available_time}"
+            )
+            line_bot_api.push_message(line_id, TextSendMessage(text=message))
+
+        cursor.close()
+        connection.close()
+    except mysql.connector.Error as e:
+        app.logger.error("數據庫錯誤: %s", e)
+    except Exception as e:
+        app.logger.error("發生錯誤: %s", e)
+
+def run_schedule():
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
+
+# 設置每天運行一次的定時任務
+schedule.every().day.at("17:19").do(send_reminders)
+
+
+# 在一個單獨的線程中運行定時任務
+threading.Thread(target=run_schedule).start()
+
 @app.route("/callback", methods=['POST'])
 def callback():
-    # get X-Line-Signature header value
-    signature = request.headers['X-Line-Signature']
-
-    # get request body as text
-    body = request.get_data(as_text=True)
-    app.logger.info("Request body: " + body)
-
-    # handle webhook body
     try:
+        # get X-Line-Signature header value
+        signature = request.headers['X-Line-Signature']
+
+        # get request body as text
+        body = request.get_data(as_text=True)
+        app.logger.info("Request body: " + body)
+
+        # handle webhook body
         handler.handle(body, signature)
     except InvalidSignatureError:
         app.logger.error("Invalid signature. Please check your channel access token/channel secret.")
         abort(400)
+    except Exception as e:
+        app.logger.error(f"Exception in callback: {e}")
+        abort(500)
     return 'OK'
 
 @handler.add(MessageEvent, message=TextMessage)
@@ -94,14 +182,14 @@ def handle_message(event):
     )
 
 # 測試資料庫連接函數
-def test_database_connection():
-    try:
-        # 連接 MySQL 資料庫
-        connection = mysql.connector.connect(**db_config)
-        return connection
-    except Exception as e:
-        print(f"Error connecting to database: {e}")
-        return None
+# def test_database_connection():
+#     try:
+#         # 連接 MySQL 資料庫
+#         connection = mysql.connector.connect(**db_config)
+#         return connection
+#     except Exception as e:
+#         print(f"Error connecting to database: {e}")
+#         return None
 
 def test_openai_connection():
     try:
